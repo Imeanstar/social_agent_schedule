@@ -42,14 +42,14 @@ class FirstScreen(QWidget):
 
     def on_next(self):
         #입력값을 변수로 저장
-        self.num_staff    = self.spin_staff.value()
-        self.num_days     = self.spin_days.value()
-        self.num_workdays = self.spin_workdays.value()
+        num_staff    = self.spin_staff.value()
+        num_days     = self.spin_days.value()
+        num_workdays = self.spin_workdays.value()
 
         print("입력된 값 : ",
-              self.num_staff,
-              self.num_days,
-              self.num_workdays)
+              num_staff,
+              num_days,
+              num_workdays)
         
         # 2) SecondScreen 생성 & 표시
         self.second = SecondScreen(num_staff, num_days, num_workdays)
@@ -58,7 +58,61 @@ class FirstScreen(QWidget):
         # 3) FirstScreen 닫기
         self.close()
         
-        # TODO : 두 번째 화면으로 넘어가는 로직 구현 필요
+class SecondScreen(QWidget):
+    def __init__(self, num_staff, num_days, num_workdays):
+        super().__init__()
+        self.num_staff = num_staff
+        self.num_days = num_days
+        self.num_workdays = num_workdays
+
+        self.setWindowTitle("두 번째 화면 : 스케쥴 입력")
+        self.resize(1200,600)
+
+        # 테이블 생성 : 행-num_staff , 열-num_days+2
+        cols = self.num_days + 2
+        self.table = QTableWidget(self.num_staff, cols, self)
+        headers = ["이름", "선호"] + [f"{i}일" for i in range(1, self.numdays+1)]
+        self.table.setHorizontalHeaderLabels(headers)
+
+        # 셀마다 위젯 배치
+        for r in range(self.num_staff):
+            #이름 입력
+            self.table.setCellWidget(r, 0, QLineEdit())
+
+            #주야선호 드롭다운
+            combo_pref = QComboBox()
+            combo_pref.addItems(["주간 선호", "야간 선호", "상관 없음"])
+            self.table.setCellWidget(r, 1 , combo_pref)
+
+            #나머지 날짜 칸
+            for c in range(2, cols):
+                combo_day = QComboBox()
+                combo_day.addItems(["X", "주", "야", "비", "휴", "연"])
+                self.table.setCellWidget(r, c , combo_day)
+
+        btn_finish = QPushButton("완료")
+        btn_finish.clicked.connect(self.on_finish)
+
+        #레이아웃
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table)
+        layout.addWidget(btn_finish)
+    
+    def on_finish(self):
+        # 예시 : 테이블 데이터 추출
+        data = []
+        for r in range(self.num_staff):
+            row = []
+            for c in range (self.num_days+2):
+                w = self.table.cellWidget(r,c)
+                if isinstance(w, QLineEdit):
+                    row.append(w.text())
+                elif isinstance(w, QComboBos):
+                    row.append(w.currentText())
+            data.appen(row)
+        print("테이블 전체 데이터", data)
+        # TODO "X" 채우기 및 3번 로직 진행
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
