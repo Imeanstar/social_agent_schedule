@@ -1,10 +1,32 @@
 import sys
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel,
     QSpinBox, QPushButton, QGridLayout,
     QVBoxLayout, QTableWidget, QLineEdit,
-    QComboBox
+    QComboBox, QHeaderView
 )
+
+
+
+# Tab 이동 커스터마이즈, 이름 작성시 중앙정렬
+class TabLineEdit(QLineEdit):
+    def __init__(self, row, table):
+        super().__init__()
+        self.row = row
+        self.table = table
+        self.setAlignment(Qt.AlignCenter)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Tab:
+            next_row = self.row + 1
+            if next_row < self.table.rowCount():
+                w = self.table.cellWidget(next_row, 0)
+                if w :
+                    w.setFocus()
+                    w.selectAll()
+                    return
+        super().keyPressEvent(event)
 
 class FirstScreen(QWidget):
     def __init__(self):
@@ -71,12 +93,22 @@ class SecondScreen(QWidget):
         # 테이블 생성 : 행-num_staff , 열-num_days+2
         cols = self.num_days + 2
         self.table = QTableWidget(self.num_staff, cols, self)
-        headers = ["이름", "선호"] + [f"{i}일" for i in range(1, self.numdays+1)]
+        headers = ["이름", "선호"] + [f"{i}일" for i in range(1, self.num_days+1)]
         self.table.setHorizontalHeaderLabels(headers)
 
-        # 셀마다 위젯 배치
+        # 셀마다 위젯 배치 (col 너비 조절 버젼)
+        self.table.setColumnWidth(0,200) #이름
+        self.table.setColumnWidth(1,120) #선호
+        for c in range(2, cols):
+            self.table.setColumnWidth(c,30)
+
+        # 기본 리사이즈 모드는 고정(Fixed)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Fixed)
+
         for r in range(self.num_staff):
             #이름 입력
+            name_edit = TabLineEdit(r, self.table)
             self.table.setCellWidget(r, 0, QLineEdit())
 
             #주야선호 드롭다운
@@ -107,7 +139,7 @@ class SecondScreen(QWidget):
                 w = self.table.cellWidget(r,c)
                 if isinstance(w, QLineEdit):
                     row.append(w.text())
-                elif isinstance(w, QComboBos):
+                elif isinstance(w, QComboBox):
                     row.append(w.currentText())
             data.appen(row)
         print("테이블 전체 데이터", data)
