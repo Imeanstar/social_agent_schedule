@@ -8,26 +8,6 @@ from PySide6.QtWidgets import (
 )
 
 
-
-# Tab 이동 커스터마이즈, 이름 작성시 중앙정렬
-class TabLineEdit(QLineEdit):
-    def __init__(self, row, table):
-        super().__init__()
-        self.row = row
-        self.table = table
-        self.setAlignment(Qt.AlignCenter)
-
-    def focusNextPrevChild(self, next: bool) -> bool:
-        if next:
-            next_row = self.row + 1
-            if next_row < self.table.rowCount():
-                w = self.table.cellWidget(next_row, 0)
-                if w:
-                    w.setFocue()
-                    w.selectAll()
-                    return True
-        return super().focusNextPPrevChild(next)
-
 class FirstScreen(QWidget):
     def __init__(self):
         super().__init__()
@@ -82,7 +62,7 @@ class FirstScreen(QWidget):
         
 class SecondScreen(QWidget):
     pref_map = {
-            "상관없음" : 0,
+            "상관 없음" : 0,
             "주간 선호" : 1,
             "야간 선호" : 2
         }
@@ -111,7 +91,7 @@ class SecondScreen(QWidget):
         total_rows = self.num_staff + 2
         total_cols = self.stat_start + 4
         
-        self.table = QTableWidget(self.num_staff, total_cols, self)
+        self.table = QTableWidget(total_rows, total_cols, self)
         headers = (
             ["이름", "선호"] + 
             [f"{i}일" for i in range(1, self.num_days+1)] + 
@@ -139,7 +119,6 @@ class SecondScreen(QWidget):
 
         for r in range(self.num_staff):
             #이름 입력
-            name_edit = TabLineEdit(r, self.table)
             self.table.setCellWidget(r, 0, QLineEdit())
 
             #주야선호 드롭다운
@@ -187,47 +166,23 @@ class SecondScreen(QWidget):
         4) 집계 열 갱신
         """
         # 1) 맵핑 테이블 정의
-        
-        
         inv_day_map = {v:k for k, v in self.day_map.items() if v in (0,1,2,3,4,5)}
-
-        # 2) 테이블에서 값 읽어와서 정수 배열로 변환
-        arr = []
-        # cols = self.num_days + 2
-        for r in range(self.num_staff):
-            row_vals = []
-
-            # -- 선호(열1)
-            pref_box = self.table.cellWidget(r,1)
-            row_vals.append(self.pref_map.get(pref_box.currentText(),0))
-
-            # -- 날짜(열2 ~ stat_start-1)
-            for c in range(self.day_start, self.stat_start):
-                text = self.table.cellWidget(r,c).currentText()
-                row_vals.append(self.day_map[text])
-            arr.append(row_vals)
-
-        for r in range(self.num_staff):
-            for j in range(len(arr[r]) - 2):
-                if arr[r][j] == 2 and arr[r][j+1] == 0 and arr[r][j+2] == 0:
-                    arr[r][j+1] = 3
-                    arr[r][j+2] = 4
 
         self.apply_rule_pref1(arr)
         self.apply_rule_pref2(arr)
-
+        self.apply_rule_rem(arr)
         self.apply_rule0(arr)
         self.final_feedback(arr)
-        self.update_summary(arr)
-        self.apply_rule_rem(arr)
+        
+        
+        
 
         # 4) 배열을 GUI에 반영 (날짜 칸만)
         for r in range(self.num_staff):
-            date_vals = arr[r][1:]
-            for j, val in enumerate(date_vals):
+            for j, val in enumerate(arr[r]):
                 col_idx = self.day_start + j
                 combo = self.table.cellWidget(r, col_idx)
-                if combo is not None :
+                if combo:
                     combo.setCurrentText(inv_day_map[val])
 
         # 5) 집계 갱신
@@ -243,7 +198,7 @@ class SecondScreen(QWidget):
             for k,v in enumerate(stats, start=self.stat_start):
                 self.table.item(r,k).setText(str(v))
 
-        
+        self.update_summary(arr)
 
         # 6) 결과 출력
         print("입력된 스케쥴 정수 배열 : ")
@@ -368,31 +323,84 @@ class SecondScreen(QWidget):
                 col_vals[idx] = 4
 
     def apply_rule_rem(self, arr):
+        """
+        남은(rem)>0 직원에 대해
+        1) 먼저 빈 칸(0) 또는 주간(1) 슬롯을 찾아 채우고,
+        2) 이후 rem이 남으면 업그레이드(1→2) 합니다.
+        직원은 rem 내림차순 우선, 칸은 compute_priority_columns 순으로 채웁니다.
+        """
         n_days = len(arr[0])
-        
-        priority = []
-        priority += [j for j in range(n_days) if self.col_cnt2[j] == 0]
-        priority += [j for j in range(n_days) if self.col_cnt1[j] == 0]
-        priority += [j for j in range(n_days) if self.col_cnt2[j] == 1]
-        priority += [j for j in range(n_days) if self.col_cnt1[j] == 1]
+        max_iters = 100
 
-        seen = set()
-        priority = [j for j in priority if not (j in seen or seen.add(j))]
+        for _ in range(max_iters):
+            # 1) rem 리스트 구하기
+            rem_list = []
+            for r in range(self.num_staff):
+                cnt1 = arr[r].count(1)
+                cnt2 = arr[r].count(2)
+                rem  = self.num_workdays - (cnt1 + cnt2 * 2)
+                rem_list.append((rem, r))
+            rem_list.sort(reverse=True)  # rem 큰 순
 
-        for r in range(self.num_staff):
-            cnt1 = arr[r].count(1)
-            cnt2 = arr[r].count(2)
-            rem = self.num_workdays - (cnt1 + cnt2 * 2)
-            if rem <= 0:
-                continue
-            
-            for j in priority:
+            # 종료 조건: 가장 큰 rem <= 0
+            if rem_list[0][0] <= 0:
+                break
+
+            changed = False
+            # 2) 직원별로 탐색
+            for rem, r in rem_list:
                 if rem <= 0:
-                    break
-                if arr[r][j] == 0:
-                    arr[r][j] = 1
-                    rem -= 1
+                    continue
 
+                # 2-1) 이 직원의 선호
+                pref_text = self.table.cellWidget(r,1).currentText()
+                pref_val  = self.pref_map.get(pref_text, 0)
+
+                # 2-2) 이 직원의 우선순위 날짜 열
+                cols = self.compute_priority_columns(arr)
+
+                # 3) 슬롯 채우기: 먼저 빈칸(0) → then 업그레이드(1→2)
+                #   A) 0 슬롯
+                for j in cols:
+                    if rem <= 0:
+                        break
+                    if arr[r][j] != 0:
+                        continue
+                    # 선호대로 채워보기
+                    if pref_val == 2 and rem >= 2:
+                        arr[r][j] = 2; rem -= 2
+                    elif pref_val == 1:
+                        arr[r][j] = 1; rem -= 1
+                    else:
+                        # 비선호 채우기: rem>=2→야, else 주
+                        if rem >= 2:
+                            arr[r][j] = 2; rem -= 2
+                        else:
+                            arr[r][j] = 1; rem -= 1
+                    changed = True
+
+                #  B) 1→2 업그레이드 (해당 직원이 야간 선호거나 rem>=1인 경우)
+                if rem > 0:
+                    for j in cols:
+                        if rem <= 0:
+                            break
+                        if arr[r][j] == 1:
+                            arr[r][j] = 2
+                            rem -= 1
+                            changed = True
+
+                # 4) 한 칸이라도 채웠으면 다음 반복에서 rem_list 재계산
+                if changed:
+                    break
+
+            if not changed:
+                # 더 이상 채울 곳이 없으면 종료
+                break
+
+        if changed is False:
+            print("⚠ apply_rule_rem: 채울 슬롯이 남아있지 않아 중단")
+
+                
     def final_feedback(self, arr):
         for r in range(self.num_staff):
             for j in range(len(arr[r]) - 1 ):
@@ -412,9 +420,12 @@ class SecondScreen(QWidget):
     def update_summary(self, arr):
         self.col_cnt1 = []
         self.col_cnt2 = []
-        n_days = len(arr[0])
 
-        for j in range(len(arr[0])):
+        days = self.num_days
+        sum_row1 = self.table.rowCount() - 2
+        sum_row2 = self.table.rowCount() - 1
+
+        for j in range(days):
             cnt1 = sum(1 for r in range(self.num_staff) if arr[r][j] == 1)
             cnt2 = sum(1 for r in range(self.num_staff) if arr[r][j] == 2)
             self.col_cnt1.append(cnt1)
@@ -422,24 +433,111 @@ class SecondScreen(QWidget):
 
             col_idx = self.day_start + j
 
-            item1 = self.table.item(self.num_staff, col_idx)
+            item1 = self.table.item(sum_row1, col_idx)
             if item1 is None:
                 item1 = QTableWidgetItem()
                 item1.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 item1.setTextAlignment(Qt.AlignCenter)
-                self.table.setItem(self.num_staff, col_idx, item1)
+                self.table.setItem(sum_row1, col_idx, item1)
             item1.setText(str(cnt1))
 
-            item2 = self.table.item(self.num_staff + 1, col_idx)
+            item2 = self.table.item(sum_row2, col_idx)
             if item2 is None:
                 item2 = QTableWidgetItem()
                 item2.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 item2.setTextAlignment(Qt.AlignCenter)
-                self.table.setItem(self.num_staff+1, col_idx, item2)
+                self.table.setItem(sum_row2, col_idx, item2)
             item2.setText(str(cnt2))
+
+    def compute_priority_columns(self, arr):
+        n_days = len(arr[0])
+        col_cnt1 = [
+            sum(1 for r in range(self.num_staff) if arr[r][j] == 1)
+            for j in range(n_days)
+        ]
+        col_cnt2 = [
+            sum(1 for r in range(self.num_staff) if arr[r][j] == 2)
+            for j in range(n_days)
+        ]
+
+        priority = []
+        priority += [j for j in range(n_days) if col_cnt2[j] == 0]
+        priority += [j for j in range(n_days) if col_cnt1[j] == 0]
+        priority += [j for j in range(n_days) if col_cnt2[j] == 1]
+        priority += [j for j in range(n_days) if col_cnt1[j] == 1]
+
+        # 중복 제거하면서 순서 유지
+        seen = set()
+        return [j for j in priority if j not in seen and not seen.add(j)]
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = FirstScreen()
     win.show()
     sys.exit(app.exec())
+
+
+'''
+    def apply_rule_rem(self, arr):
+        # 1) 열 우선순위 계산 (col_cnt1/col_cnt2 기반)
+        max_iters = 100
+        iters = 0
+        n_days = len(arr[0])
+
+        # 2) rem이 모두 0이 될 때 까지 반복
+        while True:
+            
+            # 2-a) 각 직원 rem 계산
+            rem_list = []
+            for r in range(self.num_staff):
+                cnt1 = arr[r].count(1)
+                cnt2 = arr[r].count(2)
+                rem = self.num_workdays - (cnt1 + cnt2 * 2)
+                rem_list.append((rem,r))
+
+            if all(rem == 0 for rem, _  in rem_list) or iters >= max_iters: break
+            priority = self.compute_priority_columns(arr)
+            
+            candidates = sorted(
+                [(rem, r) for rem, r in rem_list if rem > 0],
+                reverse=True, key=lambda x: x[0]
+            )
+            for j in priority:
+                for status in (0,1):
+                    for rem, r in candidates:
+                        if rem <= 0:
+                            continue
+                        if arr[r][j] == status:
+                            if status == 0:
+                                if rem >= 2:
+                                    arr[r][j] = 2
+                                    rem -= 2
+                                else:
+                                    arr[r][j] = 1
+                                    rem -= 1
+                            else:
+                                arr[r][j] = 2
+                                rem -= 1
+                            for idx, (old_rem, rr) in enumerate(candidates):
+                                if rr == r:
+                                    candidates[idx] = (rem, rr)
+                                    break
+                            break
+
+            negatives = sorted(
+                [(rem,r) for rem, r in rem_list if rem < 0],
+                key=lambda x: x[0]
+            )
+            for rem, r in negatives:
+                for j in reversed(priority):
+                    if rem >= 0:
+                        break
+                    if arr[r][j] == 1:
+                        arr[r][j] = 4
+                        rem += 1
+
+            iters += 1
+            if iters >= max_iters:
+                print(f"⚠ 반복 횟수 {max_iters}회 도달: 루프를 중단합니다.")
+                break
+'''
